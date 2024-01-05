@@ -6,11 +6,14 @@
 # ------------------------------------------------
 
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
-from scipy import stats
+from scipy import stats 
+from scipy.optimize import curve_fit
 import math
 import ROOT # We use a ROOT histogram as input
+import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter
+import matplotlib.colors as colors
+from matplotlib.colors import LogNorm
 
 # ------------------------------------------------
 # Globals
@@ -63,6 +66,44 @@ def GetBasicStats(data, xmin, xmax):
 
     return N, mean, meanErr, stdDev, stdDevErr, underflows, overflows
 
+def ProfileX(x, y, nBinsX=100, xmin=-1.0, xmax=1.0, nBinsY=100, ymin=-1.0, ymax=1.0): 
+   
+    # Create 2D histogram with one bin on the y-axis 
+    hist, xEdge_, yEdge_ = np.histogram2d(x, y, bins=[nBinsX, nBinsY], range=[[xmin, xmax], [ymin, ymax]])
+
+    # hist, xEdge_ = np.histogram(x, bins=nBinsX, range=[xmin, xmax]) # , [ymin, ymax]])
+
+    # bin widths
+    xBinWidths = xEdge_[1]-xEdge_[0]
+
+    # Calculate the mean and RMS values of each vertical slice of the 2D distribution
+    # xSlice_, xSliceErr_, ySlice_, ySliceErr_, ySliceRMS_ = [], [], [], [], []
+    xSlice_,  ySlice_, ySliceErr_, = [], [], [] 
+
+    for i in range(len(xEdge_) - 1):
+
+        # Average x-value
+        xSlice = x[ (xEdge_[i] < x) & (x <= xEdge_[i+1]) ]
+
+        # Get y-slice within current x-bin
+        ySlice = y[ (xEdge_[i] < x) & (x <= xEdge_[i+1]) ]
+
+        # Filter out np.nan values
+        ySlice = ySlice[~np.isnan(ySlice)]
+
+        # Avoid empty slices
+        if len(xSlice) == 0 or len(ySlice) == 0:
+            continue
+
+        # Central values are means and errors are standard errors on the mean
+        xSlice_.append(np.mean(xSlice))
+        # xSliceErr_.append(stats.sem(xSlice)) # RMS/sqrt(n)
+        ySlice_.append(ySlice.mean()) 
+        ySliceErr_.append(stats.sem(ySlice)) 
+        # ySliceRMS_.append(np.std(ySlice))
+
+    return np.array(xSlice_), np.array(ySlice_), np.array(ySliceErr_)
+
 # ------------------------------------------------
 # Plotting
 # ------------------------------------------------
@@ -90,7 +131,7 @@ def Plot1D_A(data, nBins=100, xmin=-1.0, xmax=1.0, title=None, xlabel=None, ylab
     if underOver: legend_text += f"\nUnderflows: {underflows}\nOverflows: {overflows}"
 
     # Add legend to the plot
-    if stats: ax.legend([legend_text], loc="best", frameon=False, fontsize=13)
+    if stats: ax.legend([legend_text], loc="upper right", frameon=False, fontsize=13)
 
     ax.set_title(title, fontsize=15, pad=10)
     ax.set_xlabel(xlabel, fontsize=13, labelpad=10) 
@@ -104,11 +145,11 @@ def Plot1D_A(data, nBins=100, xmin=-1.0, xmax=1.0, title=None, xlabel=None, ylab
     if ax.get_xlim()[1] > 9999 or ax.get_xlim()[1] < 9.999e-3:
         ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-        ax.xaxis.offsetText.set_fontsize(14)
+        ax.xaxis.offsetText.set_fontsize(13)
     if ax.get_ylim()[1] > 9999 or ax.get_ylim()[1] < 9.999e-3:
         ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
-        ax.yaxis.offsetText.set_fontsize(14)
+        ax.yaxis.offsetText.set_fontsize(13)
 
     # Save the figure
     plt.savefig(fout, dpi=300, bbox_inches="tight")
@@ -138,11 +179,11 @@ def Plot1D_B(values, bin_edges, xlabel=None, ylabel=None, fout="h1.png"):
     if ax.get_xlim()[1] > 9999 or ax.get_xlim()[1] < 9.999e-3:
         ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-        ax.xaxis.offsetText.set_fontsize(14)
+        ax.xaxis.offsetText.set_fontsize(13)
     if ax.get_ylim()[1] > 9999 or ax.get_ylim()[1] < 9.999e-3:
         ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
-        ax.yaxis.offsetText.set_fontsize(14)
+        ax.yaxis.offsetText.set_fontsize(13)
 
     # Save the figure
     plt.savefig(fout, dpi=300, bbox_inches="tight")
@@ -154,16 +195,23 @@ def Plot1D_B(values, bin_edges, xlabel=None, ylabel=None, fout="h1.png"):
 
     return
 
-# Scatter plot
-def PlotGraph(x, y, title=None, xlabel=None, ylabel=None, fout="gr.png"):
+    plt.close()
 
-    # Create a scatter plot with error bars using NumPy arrays 
+# Scatter plot
+def PlotGraphErrors(x, y, xerr=np.array([]), yerr=np.array([]), title=None, xlabel=None, ylabel=None, fout="gr.png"):
+
+   # Create a scatter plot with error bars using NumPy arrays 
 
     # Create figure and axes
     fig, ax = plt.subplots()
 
-    # Fine graphs for CRV visualisation
-    ax.scatter(x, y, color='black', s=0.25, edgecolor='black', marker='o', linestyle='None')
+    # Plot scatter with error bars
+    if len(xerr)==0: xerr = [0] * len(x) # Sometimes we only use yerr
+    if len(yerr)==0: yerr = [0] * len(y) # Sometimes we only use xerr
+
+    if len(x) != len(y): print("Warning: x has length", len(x),", while y has length", len(y))
+
+    ax.errorbar(x, y, xerr=xerr, yerr=yerr, fmt='o', color='black', markersize=4, ecolor='black', capsize=2, elinewidth=1, linestyle='None')
 
     # Set title, xlabel, and ylabel
     ax.set_title(title, fontsize=15, pad=10)
@@ -171,17 +219,18 @@ def PlotGraph(x, y, title=None, xlabel=None, ylabel=None, fout="gr.png"):
     ax.set_ylabel(ylabel, fontsize=13, labelpad=10) 
 
     # Set font size of tick labels on x and y axes
-    ax.tick_params(axis='x', labelsize=14)  # Set x-axis tick label font size
-    ax.tick_params(axis='y', labelsize=14)  # Set y-axis tick label font size
+    ax.tick_params(axis='x', labelsize=13)  # Set x-axis tick label font size
+    ax.tick_params(axis='y', labelsize=13)  # Set y-axis tick label font size
 
-    if ax.get_xlim()[1] > 9999 or ax.get_xlim()[1] < 9.999e-3:
+     # Scientific notation
+    if ax.get_xlim()[1] > 9999:
         ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-        ax.xaxis.offsetText.set_fontsize(14)
-    if ax.get_ylim()[1] > 9999 or ax.get_ylim()[1] < 9.999e-3:
+        ax.xaxis.offsetText.set_fontsize(13)
+    if ax.get_ylim()[1] > 9999:
         ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
-        ax.yaxis.offsetText.set_fontsize(14)
+        ax.yaxis.offsetText.set_fontsize(13)
 
     # Save the figure
     plt.savefig(fout, dpi=300, bbox_inches="tight")
@@ -211,22 +260,22 @@ def PlotGraphOverlay(x, y1, y2, title=None, xlabel=None, ylabel=None, fout="gr.p
         ax.axvline(x=x[boundary], color='red', linestyle='--', linewidth=1)
 
     # Set title, xlabel, and ylabel
-    ax.set_title(title, fontsize=16, pad=10)
-    ax.set_xlabel(xlabel, fontsize=14, labelpad=10) 
-    ax.set_ylabel(ylabel, fontsize=14, labelpad=10) 
+    ax.set_title(title, fontsize=15, pad=10)
+    ax.set_xlabel(xlabel, fontsize=13, labelpad=10) 
+    ax.set_ylabel(ylabel, fontsize=13, labelpad=10) 
 
     # Set font size of tick labels on x and y axes
-    ax.tick_params(axis='x', labelsize=14)  # Set x-axis tick label font size
-    ax.tick_params(axis='y', labelsize=14)  # Set y-axis tick label font size
+    ax.tick_params(axis='x', labelsize=13)  # Set x-axis tick label font size
+    ax.tick_params(axis='y', labelsize=13)  # Set y-axis tick label font size
 
     if ax.get_xlim()[1] > 9999 or ax.get_xlim()[1] < 9.999e-3:
         ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
-        ax.xaxis.offsetText.set_fontsize(14)
+        ax.xaxis.offsetText.set_fontsize(13)
     if ax.get_ylim()[1] > 9999 or ax.get_ylim()[1] < 9.999e-3:
         ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
         ax.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
-        ax.yaxis.offsetText.set_fontsize(14)
+        ax.yaxis.offsetText.set_fontsize(13)
 
     # Add legend to the plot
     ax.legend(loc="best", frameon=False, fontsize="14", markerscale=10)
@@ -238,6 +287,157 @@ def PlotGraphOverlay(x, y1, y2, title=None, xlabel=None, ylabel=None, fout="gr.p
     # Clear memory
     plt.clf()
     plt.close()
+
+    
+def Plot2D(x, y, nBinsX=100, xmin=-1.0, xmax=1.0, nBinsY=100, ymin=-1.0, ymax=1.0, title=None, xlabel=None, ylabel=None, fout="hist.png", log=False, cb=True):
+
+    # Filter out empty entries from x and y
+    valid_indices = [i for i in range(len(x)) if np.any(x[i]) and np.any(y[i])]
+
+    # Extract valid data points based on the indices
+    x = [x[i] for i in valid_indices]
+    y = [y[i] for i in valid_indices]
+
+    # Check if the input arrays are not empty and have the same length
+    if len(x) == 0 or len(y) == 0:
+        print("Input arrays are empty.")
+        return
+    if len(x) != len(y):
+        print("Input arrays x and y have different lengths.")
+        return
+
+    # Create 2D histogram
+    hist, x_edges, y_edges = np.histogram2d(x, y, bins=[nBinsX, nBinsY], range=[[xmin, xmax], [ymin, ymax]])
+    x_bin_centres_ = (x_edges[:-1] + x_edges[1:]) / 2
+
+    # Set up the plot
+    fig, ax = plt.subplots()
+
+    norm = colors.Normalize(vmin=0, vmax=np.max(hist))  
+    if log: norm = colors.LogNorm(vmin=1, vmax=np.max(hist)) 
+
+    # Plot the 2D histogram
+    im = ax.imshow(hist.T, cmap='inferno', extent=[xmin, xmax, ymin, ymax], aspect='auto', origin='lower', norm=norm) 
+    # im = ax.imshow(hist.T, extent=[xmin, xmax, ymin, ymax], aspect='auto', origin='lower', vmax=np.max(hist))
+
+    # Add colourbar
+    if cb: plt.colorbar(im)
+
+    plt.title(title, fontsize=15, pad=10)
+    plt.xlabel(xlabel, fontsize=13, labelpad=10)
+    plt.ylabel(ylabel, fontsize=13, labelpad=10)
+
+    # Scientific notation
+    if ax.get_xlim()[1] > 99999:
+        ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+        ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+        ax.xaxis.offsetText.set_fontsize(13)
+    if ax.get_ylim()[1] > 99999:
+        ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+        ax.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+        ax.yaxis.offsetText.set_fontsize(13)
+
+    plt.savefig(fout, dpi=300, bbox_inches="tight")
+    print("---> Written", fout)
+
+    # Clear memory
+    plt.close()
+
+    return 
+
+# ------------------------------------------------
+# Fitting
+# ------------------------------------------------
+
+# Simple sine fit, should be good enough
+def FitFunction(t, A, phi_g2, c):
+    return A * np.sin(OMEGA_A*t + phi_g2) + c 
+ 
+def FitAndPlotGraph(x, y, xerr=np.array([]), yerr=np.array([]), pi_=[], phi_g2=0.0, fitMin=0, fitMax=1, title=None, xlabel=None, ylabel=None, fout="gr.png"):
+
+    # Create figure and axes
+    fig, ax = plt.subplots()
+
+    # Plot scatter with error bars
+    if len(xerr) == 0:
+        xerr = [0] * len(x)  # Sometimes we only use yerr
+    if len(yerr) == 0:
+        yerr = [0] * len(y)  # Sometimes we only use yerr
+
+    if len(x) != len(y):
+        print("Warning: x has length", len(x), ", while y has length", len(y))
+
+    ax.errorbar(x, y, xerr=xerr, yerr=yerr, fmt='o', color='black', markersize=4, ecolor='black', capsize=2, elinewidth=1, linestyle='None', zorder=2)
+
+    # Set title, xlabel, and ylabel
+    ax.set_title(title, fontsize=16, pad=10)
+    ax.set_xlabel(xlabel, fontsize=14, labelpad=10)
+    ax.set_ylabel(ylabel, fontsize=14, labelpad=10)
+
+    # Set font size of tick labels on x and y axes
+    ax.tick_params(axis='x', labelsize=14)  # Set x-axis tick label font size
+    ax.tick_params(axis='y', labelsize=14)  # Set y-axis tick label font size
+
+    # Scientific notation
+    if ax.get_xlim()[1] > 9999:
+        ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+        ax.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
+        ax.xaxis.offsetText.set_fontsize(14)
+    if ax.get_ylim()[1] > 9999:
+        ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+        ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+        ax.yaxis.offsetText.set_fontsize(14)
+
+    # Set fit range
+    x_f = x[(x >= fitMin) & (x <= fitMax)]
+    y_f = y[(x >= fitMin) & (x <= fitMax)]
+    # xerr_f = xerr[(x >= fitMin) & (x <= fitMax)]
+    yerr_f = yerr[(x >= fitMin) & (x <= fitMax)]
+
+    # Fix g-2 phase by setting bounds 
+    lower_bounds = [-np.inf, pi_[1] - 1e-15, -np.inf]
+    upper_bounds = [np.inf, pi_[1] + 1e-15, np.inf]
+
+    # Calculate fit parameters
+    pf_, cov = curve_fit(FitFunction, x_f, y_f, sigma=yerr_f, absolute_sigma=True, p0=pi_, bounds=(lower_bounds, upper_bounds))
+
+    # Extract errors
+    pferr_ = np.sqrt(np.diag(cov))
+
+    # Calculate the chi-squared value
+    fit_residuals = y_f - FitFunction(x_f, *pf_)
+    chi_squared = np.sum((fit_residuals / yerr_f)**2)
+
+    # Calculate the degrees of freedom
+    dof = len(x_f) - len(pf_)
+
+    # Calculate the reduced chi-squared value
+    chi_squared_per_dof = chi_squared / dof
+
+    # Plot the fitted line
+    fit_x = np.linspace(float(fitMin), float(fitMax), 100)
+    fit_y = FitFunction(fit_x, *pf_)
+
+    ax.plot(fit_x, fit_y, color='red', linestyle='-', label=f"$\\alpha(t)=\delta\cdot\sin(\omega_{{a}} t+\phi)+c$\n$\chi^2/ndf={Round(chi_squared_per_dof, 3)}$\n$\delta={Round(pf_[0], 3)}\pm{Round(pferr_[0], 3)}$\n$\phi={Round(pf_[1], 3)}\pm{Round(pferr_[1], 3)}$\n$c={Round(pf_[2], 3)}\pm{Round(pferr_[2], 3)}$", zorder=3)
+    # ax.plot(fit_x, fit_y, color='red', linestyle='-', label=f"$\\alpha(t)=\delta\cdot\sin(\omega_{{a}} t)$\n$\chi^2/ndf={Round(chi_squared_per_dof, 3)}$\n$\delta={Round(pf_[0], 3)}\pm{Round(pferr_[0], 1)}$", zorder=3) 
+
+    # Set the desired y-range
+    ax.set_ylim(-42.5, 42.5)  # Set the range you want
+
+    # Save the figure
+    plt.legend(loc="best", frameon=False, fontsize=13)
+    plt.savefig(fout, dpi=300, bbox_inches="tight")
+    print("---> Written", fout)
+
+    print("A =", pf_[0], "+/-", pferr_[0])
+    # print("phi =", pf_[1], "+/-", pferr_[1])
+    # print("c =", pf_[1], "+/-", pferr_[1])
+
+    # Clear memory
+    plt.clf()
+    plt.close()
+
+    return
 
 # ------------------------------------------------
 # Azimuthal acceptance
@@ -317,18 +517,21 @@ def Br(phi):
     return 0 + 100. * np.sin(phi) # N_0 + N_1, let a_1 = 100 ppm
 
 # ------------------------------------------------
-# Vertical polarisation 
+# Vertical polarisation angle
 # ------------------------------------------------
 
-def PolY(t, boundaries=np.array([]), labFrame=False):
+# Vertical polarisation
+# Assume everything is lab frame
+def PolY(t, phi_g2 = 0, boundaries=np.array([])): # , labFrame=False):
 
-    phi = OMEGA_C*t % 2 * np.pi
+    # Modulate
+    phi = OMEGA_C*t % (2 * np.pi)
 
-    # Tilt angle 
-    tilt = Br(phi) # Muon rest frame
-    if labFrame: tilt = np.arctan( np.tan(tilt) / GMAGIC ) # Lab frame
-    # Polarisation
-    pol_y = (0 * np.cos(OMEGA_A * t)) + (tilt * np.sin(OMEGA_A * t)) # g-2 is cosine, Br is sine 
+    # Tilt angle at this azimuth
+    tilt = Br(phi) 
+
+    # Polarisation angle oscillation, phase is zero
+    pol_y = (0 * np.cos(OMEGA_A * t + phi_g2)) + (tilt * np.sin(OMEGA_A * t + phi_g2)) # g-2 is cosine, Br is sine 
 
     # Are we within the azimuthal acceptance of the trackers?
     if len(boundaries) > 0:
@@ -338,12 +541,12 @@ def PolY(t, boundaries=np.array([]), labFrame=False):
     else: 
         return pol_y
 
-
 # ------------------------------------------------
 # Run 
 # ------------------------------------------------
 
-def RunToyBr(n_decays=1e4):  
+# Input number of decays and g-2 phase
+def RunToyBr(n_decays=1e4): 
 
     # Get acceptance over a range of azimuths
     # Do this first so we have a consistent set of phi_ throughout
@@ -355,83 +558,90 @@ def RunToyBr(n_decays=1e4):
     # Varying radial field for these azimuths (full ring)
     Br_ = np.array([Br(phi) for phi in phi_]) 
     # Sanity plot
-    PlotGraph(x=phi_, y=Br_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/Br_vs_phi.png")
+    PlotGraphErrors(x=phi_, y=Br_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi.png")
 
-    # Generate decay times from a exponential distribution
+    # Generate decay times by sampling from a exponential distribution
     # I think this is important so you're not just sampling the same g-2 phase every cyclotron period
+    np.random.seed(12345)
     lifetime = TAU*GMAGIC
     t_ = np.random.exponential(scale=lifetime, size=int(n_decays)) 
     t_ = np.clip(t_, 0, 700) # Clip the samples between 0 and 700 us
     # Sanity plot
-    Plot1D_A(t_, 70, 0, 700, xlabel="Time [$\mu$s]", ylabel="Decays / 10 $\mu$s", fout="Images/decay_times_"+str(int(n_decays))+".png")
+    Plot1D_A(t_, 70, 0, 700, xlabel="Time [$\mu$s]", ylabel="Decays / 10 $\mu$s", fout="Images/h1_decay_times_"+str(int(n_decays))+".png")
 
     # Modulate these times over the g-2 period
     t_mod_ = t_ % G2PERIOD
+
     # Sanity plot
-    Plot1D_A(t_mod_, 700, 0, G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Decays / $\mu$s", fout="Images/t_mod_"+str(int(n_decays))+".png")
-    
-    # Generate the vertical polarisation over these times with a varying radial field
-    pol_y_ = np.array([PolY(t) for t in t_]) 
+    Plot1D_A(t_mod_, 700, 0, G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Decays / $\mu$s", fout="Images/h1_t_mod_"+str(int(n_decays))+".png")
 
-    # Vertical polarisation with full acceptance
-    PlotGraph(t_, pol_y_, xlabel="Time [$\mu$s]", ylabel="Vertical polarisation [$\mu$rad]", fout="Images/pol_y_vs_t_"+str(int(n_decays))+".png")
-    PlotGraph(t_mod_, pol_y_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Vertical polarisation [$\mu$rad]", fout="Images/pol_y_vs_t_mod_"+str(int(n_decays))+".png")
-    Plot1D_A(pol_y_, nBins=230, xmin=-115., xmax=115., xlabel="Vertical polarisation [$\mu$rad]", ylabel="Decays / $\mu$rad", fout="Images/pol_y_"+str(int(n_decays))+".png", errors=True, underOver=True)
+    # ----------------------------------------
 
-    # Now we include the acceptance 
+    # Now we set up the acceptance 
     acc_weights_ = GetAcceptanceWeights(acc_)
 
     # Accepted Br, for illustration
     Br_acc_ = Br_ * acc_weights_ 
-    PlotGraphOverlay(x=phi_, y1=Br_, y2=Br_acc_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/Br_vs_phi_acc_"+str(int(n_decays))+".png")
+    PlotGraphOverlay(x=phi_, y1=Br_, y2=Br_acc_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi_acc_"+str(int(n_decays))+".png")
 
     # Get acceptance boundaries
-    # boundaries_ = GetAcceptanceBoundaries(Br_acc_)
-    boundaries_ = GetAcceptanceBoundaries(Br_acc_) # Br_acc_)
+    boundaries_ = GetAcceptanceBoundaries(Br_acc_)
 
     # This is dumb. Convert the boundaries into phi here
     boundaries_phi_ = np.array([phi_[boundary] for boundary in boundaries_])
+
+    # ----------------------------------------
+
+    # Get the vertical polarisation over a range of g-2 phases
+    phi_g2_ = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi]
+
+    for phi_g2 in phi_g2_:
+
+        phi_g2_str = str(int(phi_g2 * 180 / np.pi))
+        print(phi_g2_str)
+
+        # Generate the vertical polarisation over these times with a varying radial field
+        pol_y_ = np.array([PolY(t, phi_g2=phi_g2) for t in t_]) 
+
+        # Plot the vertical polarisation with full acceptance
+        PlotGraphErrors(x=t_, y=pol_y_, xlabel="Time [$\mu$s]", ylabel=r"$\alpha$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        PlotGraphErrors(x=t_mod_, y=pol_y_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$deg]", fout="Images/gr_pol_y_vs_t_mod_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        Plot1D_A(pol_y_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$deg]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", errors=True, underOver=False)
+        Plot2D(x=t_mod_, y=pol_y_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
+        Plot2D(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
+        
+        # Now generate the polarisation for the accepted Br 
+        pol_y_acc_ = np.array([PolY(t, phi_g2=phi_g2, boundaries=boundaries_phi_) for t in t_]) 
+
+        # Plot the vertical polarisation with partial acceptance
+        PlotGraphErrors(x=t_, y=pol_y_acc_, xlabel="Time [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        PlotGraphErrors(x=t_mod_, y=pol_y_acc_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        Plot1D_A(pol_y_acc_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$rad]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", errors=True, underOver=False)
+        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
+        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False)
+
+        # Rebin pol_y vs t_mod 
+        t_mod_rebin_, pol_y_rebin_, pol_y_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110)
+        t_mod_acc_rebin_, pol_y_acc_rebin_, pol_y_acc_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110)
     
-    # Now generate the polarisation for the accepted Br 
-    pol_y_acc_ = np.array([PolY(t, boundaries=boundaries_phi_) for t in t_]) 
+        PlotGraphErrors(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        PlotGraphErrors(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
 
-    # Plot the accepted polarisation
-    PlotGraph(t_, pol_y_acc_, xlabel="Time [$\mu$s]", ylabel="Vertical polarisation [$\mu$rad]", fout="Images/pol_y_vs_t_acc_"+str(int(n_decays))+".png")
-    PlotGraph(t_mod_, pol_y_acc_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Vertical polarisation [$\mu$rad]", fout="Images/pol_y_vs_t_mod_acc_"+str(int(n_decays))+".png")
-    
-    Plot1D_A(pol_y_acc_, nBins=230, xmin=-115., xmax=115., xlabel="Vertical polarisation [$\mu$rad]", ylabel="Decays / $\mu$rad", fout="Images/pol_y_acc_"+str(int(n_decays))+".png", errors=True, underOver=True)
-
-    # Get stats
-    N, mean, meanErr, stdDev, stdDevErr, underflows, overflows = GetBasicStats(pol_y_, -100, 100)
-    N_acc, mean_acc, meanErr_acc, stdDev_acc, stdDevErr_acc, underflows_acc, overflows_acc = GetBasicStats(pol_y_acc_, -100, 100)
-
-    # Printout
-    print("\nStatistics for the vertical polarisation WITHOUT acceptance:")
-    print(f"  N          : {N}")
-    print(f"  Mean       : {mean} ± {meanErr}")
-    print(f"  StdDev     : {stdDev} ± {stdDevErr}")
-    print(f"  Underflows : {underflows}")
-    print(f"  Overflows  : {overflows}")
-
-    print("\nStatistics for the vertical polarisation WITH acceptance:")
-    print(f"  N          : {N_acc}")
-    print(f"  Mean       : {mean_acc} ± {meanErr_acc}")
-    print(f"  StdDev     : {stdDev_acc} ± {stdDevErr_acc}")
-    print(f"  Underflows : {underflows_acc}")
-    print(f"  Overflows  : {overflows_acc}")
+        # Fit
+        FitAndPlotGraph(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, pi_=[0.0, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        FitAndPlotGraph(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, pi_=[-50, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
 
     return
-
-
 
 # ------------------------------------------------
 # main 
 # ------------------------------------------------
 
 def main():
-    
-    n_samples = 1e7
+
+    n_samples = 1e6
     RunToyBr(n_samples) 
+
 
     return
 
