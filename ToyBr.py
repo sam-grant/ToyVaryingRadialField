@@ -313,15 +313,17 @@ def Plot2D(x, y, nBinsX=100, xmin=-1.0, xmax=1.0, nBinsY=100, ymin=-1.0, ymax=1.
     # Set up the plot
     fig, ax = plt.subplots()
 
-    norm = colors.Normalize(vmin=0, vmax=np.max(hist))  
-    if log: norm = colors.LogNorm(vmin=1, vmax=np.max(hist)) 
+    # Normalise
+    norm = colors.Normalize(vmin=np.min(hist), vmax=np.max(hist)*0.666)  
+    if log: norm = colors.LogNorm(vmin=np.min(hist), vmax=np.max(hist)) 
 
     # Plot the 2D histogram
     im = ax.imshow(hist.T, cmap='inferno', extent=[xmin, xmax, ymin, ymax], aspect='auto', origin='lower', norm=norm) 
     # im = ax.imshow(hist.T, extent=[xmin, xmax, ymin, ymax], aspect='auto', origin='lower', vmax=np.max(hist))
 
     # Add colourbar
-    if cb: plt.colorbar(im)
+    if cb:
+        cbar = plt.colorbar(im) 
 
     plt.title(title, fontsize=15, pad=10)
     plt.xlabel(xlabel, fontsize=13, labelpad=10)
@@ -353,7 +355,7 @@ def Plot2D(x, y, nBinsX=100, xmin=-1.0, xmax=1.0, nBinsY=100, ymin=-1.0, ymax=1.
 def FitFunction(t, A, phi_g2, c):
     return A * np.sin(OMEGA_A*t + phi_g2) + c 
  
-def FitAndPlotGraph(x, y, xerr=np.array([]), yerr=np.array([]), pi_=[], phi_g2=0.0, fitMin=0, fitMax=1, title=None, xlabel=None, ylabel=None, fout="gr.png"):
+def FitAndPlotGraph(x, y, xerr=np.array([]), yerr=np.array([]), pi_=[], fitMin=0, fitMax=1, title=None, xlabel=None, ylabel=None, fout="gr.png"):
 
     # Create figure and axes
     fig, ax = plt.subplots()
@@ -418,11 +420,11 @@ def FitAndPlotGraph(x, y, xerr=np.array([]), yerr=np.array([]), pi_=[], phi_g2=0
     fit_x = np.linspace(float(fitMin), float(fitMax), 100)
     fit_y = FitFunction(fit_x, *pf_)
 
-    ax.plot(fit_x, fit_y, color='red', linestyle='-', label=f"$\\alpha(t)=\delta\cdot\sin(\omega_{{a}} t+\phi)+c$\n$\chi^2/ndf={Round(chi_squared_per_dof, 3)}$\n$\delta={Round(pf_[0], 3)}\pm{Round(pferr_[0], 3)}$\n$\phi={Round(pf_[1], 3)}\pm{Round(pferr_[1], 3)}$\n$c={Round(pf_[2], 3)}\pm{Round(pferr_[2], 3)}$", zorder=3)
+    ax.plot(fit_x, fit_y, color='red', linestyle='-', label=f"$\\alpha(t)=\delta\cdot\sin(\omega_{{a}} t+\phi)+c$\n$\chi^2/ndf={Round(chi_squared_per_dof, 3)}$\n$\delta={Round(pf_[0], 3)}\pm{Round(pferr_[0], 3)}$\n$\phi={Round(pi_[1], 3)}\pm{Round(0, 3)}$\n$c={Round(pf_[2], 3)}\pm{Round(pferr_[2], 3)}$", zorder=3)
     # ax.plot(fit_x, fit_y, color='red', linestyle='-', label=f"$\\alpha(t)=\delta\cdot\sin(\omega_{{a}} t)$\n$\chi^2/ndf={Round(chi_squared_per_dof, 3)}$\n$\delta={Round(pf_[0], 3)}\pm{Round(pferr_[0], 1)}$", zorder=3) 
 
     # Set the desired y-range
-    ax.set_ylim(-42.5, 42.5)  # Set the range you want
+    ax.set_ylim(-75, 75)  # Set the range you want
 
     # Save the figure
     plt.legend(loc="best", frameon=False, fontsize=13)
@@ -513,8 +515,18 @@ def GetAcceptanceBoundaries(Br_acc_):
 # ------------------------------------------------
 
 # A sine wave at the cyclotron frequency
-def Br(phi):
-    return 0 + 100. * np.sin(phi) # N_0 + N_1, let a_1 = 100 ppm
+def BrSin(phi, phi_1):
+    return 0 + 100. * np.sin(phi + phi_1) # N_0 + N_1, let a_1 = 100 ppm
+
+# Pull a random number from uniform distribution between +-100 ppm
+def BrRdm(): # 
+    # Set the range for the uniform distribution
+    lower_bound = -100
+    upper_bound = 100
+    # Specify the size of the random sample
+    sample_size = 1  
+    # Generate random numbers from a uniform distribution
+    return np.random.uniform(low=lower_bound, high=upper_bound, size=sample_size)[0]
 
 # ------------------------------------------------
 # Vertical polarisation angle
@@ -522,13 +534,14 @@ def Br(phi):
 
 # Vertical polarisation
 # Assume everything is lab frame
-def PolY(t, phi_g2 = 0, boundaries=np.array([])): # , labFrame=False):
+def PolY(t, phi_g2=0, boundaries=np.array([]), rdm=False, phi_1=0): # , labFrame=False):
 
     # Modulate
     phi = OMEGA_C*t % (2 * np.pi)
 
     # Tilt angle at this azimuth
-    tilt = Br(phi) 
+    tilt = BrSin(phi, phi_1) 
+    if rdm: tilt = BrRdm() 
 
     # Polarisation angle oscillation, phase is zero
     pol_y = (0 * np.cos(OMEGA_A * t + phi_g2)) + (tilt * np.sin(OMEGA_A * t + phi_g2)) # g-2 is cosine, Br is sine 
@@ -546,7 +559,7 @@ def PolY(t, phi_g2 = 0, boundaries=np.array([])): # , labFrame=False):
 # ------------------------------------------------
 
 # Input number of decays and g-2 phase
-def RunToyBr(n_decays=1e4): 
+def RunToyBr(n_decays=1e4, rdm=False, phi_1 = 0): 
 
     # Get acceptance over a range of azimuths
     # Do this first so we have a consistent set of phi_ throughout
@@ -556,9 +569,18 @@ def RunToyBr(n_decays=1e4):
     phi_ = (phi_bin_edges_[:-1] + phi_bin_edges_[1:]) / 2
 
     # Varying radial field for these azimuths (full ring)
-    Br_ = np.array([Br(phi) for phi in phi_]) 
+    Br_ = np.array([]) 
+    if not rdm: Br_ = np.array([BrSin(phi, phi_1) for phi in phi_]) 
+    else: Br_ = np.array([BrRdm() for phi in phi_])
+
+    # Labelling
+    rdmStr = ""
+    if rdm: rdmStr += "_rdm"
+
+    phi_1_str = "_phi1_"+str(int(phi_1 * 180 / np.pi))+"deg"
+
     # Sanity plot
-    PlotGraphErrors(x=phi_, y=Br_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi.png")
+    PlotGraphErrors(x=phi_, y=Br_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi"+phi_1_str+rdmStr+".png")
 
     # Generate decay times by sampling from a exponential distribution
     # I think this is important so you're not just sampling the same g-2 phase every cyclotron period
@@ -567,13 +589,13 @@ def RunToyBr(n_decays=1e4):
     t_ = np.random.exponential(scale=lifetime, size=int(n_decays)) 
     t_ = np.clip(t_, 0, 700) # Clip the samples between 0 and 700 us
     # Sanity plot
-    Plot1D_A(t_, 70, 0, 700, xlabel="Time [$\mu$s]", ylabel="Decays / 10 $\mu$s", fout="Images/h1_decay_times_"+str(int(n_decays))+".png")
+    Plot1D_A(t_, 70, 0, 700, xlabel="Time [$\mu$s]", ylabel="Decays / 10 $\mu$s", fout="Images/h1_decay_times_"+str(int(n_decays))+rdmStr+".png")
 
     # Modulate these times over the g-2 period
     t_mod_ = t_ % G2PERIOD
 
     # Sanity plot
-    Plot1D_A(t_mod_, 700, 0, G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Decays / $\mu$s", fout="Images/h1_t_mod_"+str(int(n_decays))+".png")
+    Plot1D_A(t_mod_, 700, 0, G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel="Decays / $\mu$s", fout="Images/h1_t_mod_"+str(int(n_decays))+rdmStr+".png")
 
     # ----------------------------------------
 
@@ -582,7 +604,7 @@ def RunToyBr(n_decays=1e4):
 
     # Accepted Br, for illustration
     Br_acc_ = Br_ * acc_weights_ 
-    PlotGraphOverlay(x=phi_, y1=Br_, y2=Br_acc_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi_acc_"+str(int(n_decays))+".png")
+    PlotGraphOverlay(x=phi_, y1=Br_, y2=Br_acc_, xlabel="Ring azimuth [rad]", ylabel="$B_{r}$ [ppm] / 0.01 rad", fout="Images/gr_Br_vs_phi_acc_"+str(int(n_decays))+phi_1_str+rdmStr+".png")
 
     # Get acceptance boundaries
     boundaries_ = GetAcceptanceBoundaries(Br_acc_)
@@ -593,43 +615,43 @@ def RunToyBr(n_decays=1e4):
     # ----------------------------------------
 
     # Get the vertical polarisation over a range of g-2 phases
-    phi_g2_ = [0.0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi]
+    phi_g2_ = [0.0] # , np.pi/4, np.pi/2, 3*np.pi/4, np.pi]
 
     for phi_g2 in phi_g2_:
 
-        phi_g2_str = str(int(phi_g2 * 180 / np.pi))
+        phi_g2_str = "_phig2_"+str(int(phi_g2 * 180 / np.pi))+"deg"
         print(phi_g2_str)
 
         # Generate the vertical polarisation over these times with a varying radial field
-        pol_y_ = np.array([PolY(t, phi_g2=phi_g2) for t in t_]) 
+        pol_y_ = np.array([PolY(t, phi_g2=phi_g2, rdm=rdm, phi_1=phi_1) for t in t_]) 
 
         # Plot the vertical polarisation with full acceptance
-        PlotGraphErrors(x=t_, y=pol_y_, xlabel="Time [$\mu$s]", ylabel=r"$\alpha$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        PlotGraphErrors(x=t_mod_, y=pol_y_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$deg]", fout="Images/gr_pol_y_vs_t_mod_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        Plot1D_A(pol_y_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$deg]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", errors=True, underOver=False)
-        Plot2D(x=t_mod_, y=pol_y_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
-        Plot2D(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
+        PlotGraphErrors(x=t_, y=pol_y_, xlabel="Time [$\mu$s]", ylabel=r"$\alpha$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        PlotGraphErrors(x=t_mod_, y=pol_y_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$deg]", fout="Images/gr_pol_y_vs_t_mod_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        Plot1D_A(pol_y_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$deg]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", errors=True, underOver=False)
+        Plot2D(x=t_mod_, y=pol_y_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", cb=False, log=False) 
+        Plot2D(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_vs_t_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", cb=False, log=False) 
         
         # Now generate the polarisation for the accepted Br 
-        pol_y_acc_ = np.array([PolY(t, phi_g2=phi_g2, boundaries=boundaries_phi_) for t in t_]) 
+        pol_y_acc_ = np.array([PolY(t, phi_g2=phi_g2, rdm=rdm, phi_1=phi_1, boundaries=boundaries_phi_) for t in t_]) 
 
         # Plot the vertical polarisation with partial acceptance
-        PlotGraphErrors(x=t_, y=pol_y_acc_, xlabel="Time [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        PlotGraphErrors(x=t_mod_, y=pol_y_acc_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        Plot1D_A(pol_y_acc_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$rad]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_acc_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", errors=True, underOver=False)
-        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False) 
-        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png", cb=False, log=False)
+        PlotGraphErrors(x=t_, y=pol_y_acc_, xlabel="Time [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_acc_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        PlotGraphErrors(x=t_mod_, y=pol_y_acc_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_acc_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        Plot1D_A(pol_y_acc_, nBins=240, xmin=-120., xmax=120., xlabel=r"${\alpha}$ [$\mu$rad]", ylabel="Decays / $\mu$rad", fout="Images/h1_pol_y_acc_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", errors=True, underOver=False)
+        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=1000, xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", cb=False, log=False) 
+        Plot2D(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/h2_pol_y_acc_vs_t_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png", cb=False, log=False)
 
         # Rebin pol_y vs t_mod 
-        t_mod_rebin_, pol_y_rebin_, pol_y_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110)
-        t_mod_acc_rebin_, pol_y_acc_rebin_, pol_y_acc_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=240, ymin=-110, ymax=110)
+        t_mod_rebin_, pol_y_rebin_, pol_y_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110)
+        t_mod_acc_rebin_, pol_y_acc_rebin_, pol_y_acc_rebin_err_ = ProfileX(x=t_mod_, y=pol_y_acc_, nBinsX=int(G2PERIOD/T_c), xmin=0, xmax=G2PERIOD, nBinsY=480, ymin=-110, ymax=110)
     
-        PlotGraphErrors(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        PlotGraphErrors(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        PlotGraphErrors(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        PlotGraphErrors(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
 
         # Fit
-        FitAndPlotGraph(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, pi_=[0.0, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
-        FitAndPlotGraph(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, pi_=[-50, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+"_"+phi_g2_str+"deg.png")
+        FitAndPlotGraph(x=t_mod_rebin_, y=pol_y_rebin_, yerr=pol_y_rebin_err_, pi_=[0.0, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_vs_t_mod_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
+        FitAndPlotGraph(x=t_mod_acc_rebin_, y=pol_y_acc_rebin_, yerr=pol_y_acc_rebin_err_, pi_=[-50, phi_g2, 0.0], fitMin=0, fitMax=G2PERIOD, title = r"$\varphi_{1}=$"+str(int(phi_1 * 180/np.pi))+"$^{\circ}$", xlabel="Time modulo $g-2$ [$\mu$s]", ylabel=r"${\alpha}$ [$\mu$rad]", fout="Images/gr_fit_pol_y_acc_vs_t_mod_rebin_"+str(int(n_decays))+phi_g2_str+phi_1_str+rdmStr+".png")
 
     return
 
@@ -639,9 +661,11 @@ def RunToyBr(n_decays=1e4):
 
 def main():
 
-    n_samples = 1e6
-    RunToyBr(n_samples) 
-
+    n_decays = 1e3
+    rdm = True
+    # phi_1_ = [0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi]
+    # [RunToyBr(n_decays=n_decays, rdm=rdm, phi_1=phi_1) for phi_1 in phi_1_]
+    RunToyBr(n_decays=n_decays, rdm=rdm, phi_1=0.0) 
 
     return
 
